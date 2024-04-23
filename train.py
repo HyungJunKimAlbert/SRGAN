@@ -196,9 +196,9 @@ if __name__ == "__main__":
     os.environ["TORCH_USE_CUDA_DSA"] = '1'
 
     # Options 
-    EPOCHS = 200
+    EPOCHS = 300
     BATCH_SIZE = 8
-    LEARNING_RATE = 1e-5
+    LEARNING_RATE = 5e-6
     CHECKPOINT_PATH = "/home/hjkim/projects/local_dev/dental_SRNet/SRGAN/checkpoint"
     PLOT_PATH = "/home/hjkim/projects/local_dev/dental_SRNet/SRGAN/checkpoint"
     IMAGE_SIZE = 512
@@ -217,7 +217,6 @@ if __name__ == "__main__":
     opt_gen = optim.Adam(gen.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999))
     opt_disc = optim.Adam(disc.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999))
     scheduler = ReduceLROnPlateau(opt_gen, mode='min', patience=3, factor=0.5, verbose=True)
-
     # Import Dataset
     train_data, valid_data, test_data = split_dataset()
 
