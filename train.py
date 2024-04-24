@@ -12,13 +12,13 @@ from torchvision import transforms
 from model_gan_re import *
 from datasets import SRdataset
 from util import *
-from losses import PerceptualLoss_VGG, PerceptualLoss_ResNet, ssim_loss
+from losses import PerceptualLoss_VGG, PerceptualLoss_ResNet, ssim_loss, GeneratorLoss, DiscriminatorLoss 
 from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 warnings.filterwarnings('ignore')
 
-def train_one_epoch(loader, disc, gen, feature_extractor, opt_gen, opt_disc, criterion, criterion_content, device):
+def train_one_epoch(loader, disc, gen, feature_extractor, opt_gen, opt_disc, bce, mse, device):
     gen.train(); disc.train()
     gen_loss, disc_loss, running_psnr = 0.0, 0.0, 0.0
 
@@ -31,8 +31,8 @@ def train_one_epoch(loader, disc, gen, feature_extractor, opt_gen, opt_disc, cri
         # Train Discriminator
         disc_real = disc(high_res)
         disc_fake = disc(fake.detach())
-        disc_loss_real = criterion(disc_real, torch.ones_like(disc_real))
-        disc_loss_fake = criterion(disc_fake, torch.zeros_like(disc_fake))
+        disc_loss_real = bce(disc_real, torch.ones_like(disc_real))
+        disc_loss_fake = bce(disc_fake, torch.zeros_like(disc_fake))
 
         loss_D = disc_loss_real + disc_loss_fake
 
@@ -42,12 +42,12 @@ def train_one_epoch(loader, disc, gen, feature_extractor, opt_gen, opt_disc, cri
         
         # Train Generator
         disc_fake = disc(fake)
-        adversarial_loss = 1e-3*criterion(disc_fake, torch.ones_like(disc_fake))
+        adversarial_loss = 1e-3*bce(disc_fake, torch.ones_like(disc_fake))
         # Content Loss
         gen_features = feature_extractor(fake)
         real_features = feature_extractor(high_res)
 
-        loss_content = criterion_content(gen_features, real_features)
+        loss_content = mse(gen_features, real_features)
         loss_G = loss_content + adversarial_loss
 
         opt_gen.zero_grad()
@@ -68,7 +68,7 @@ def train_one_epoch(loader, disc, gen, feature_extractor, opt_gen, opt_disc, cri
     return final_gen_loss, final_disc_loss, final_psnr
 
 
-def valid_one_epoch(loader, disc, gen, feature_extractor, criterion, criterion_content, device):
+def valid_one_epoch(loader, disc, gen, feature_extractor, bce, mse, device):
     gen.eval(); disc.eval()
     gen_loss, disc_loss, running_psnr = 0.0, 0.0, 0.0
     with torch.no_grad():
@@ -82,18 +82,18 @@ def valid_one_epoch(loader, disc, gen, feature_extractor, criterion, criterion_c
             disc_real = disc(high_res)
             disc_fake = disc(fake.detach())
 
-            disc_loss_real = criterion(disc_real, torch.ones_like(disc_real))
-            disc_loss_fake = criterion(disc_fake, torch.zeros_like(disc_fake))
+            disc_loss_real = bce(disc_real, torch.ones_like(disc_real))
+            disc_loss_fake = bce(disc_fake, torch.zeros_like(disc_fake))
 
-            loss_D = disc_loss_real + disc_loss_fake
+            loss_D = (disc_loss_real + disc_loss_fake) 
             
             # Train Generator
             disc_fake = disc(fake)
-            adversarial_loss = 1e-3*criterion(disc_fake, torch.ones_like(disc_fake))
+            adversarial_loss = 1e-3*bce(disc_fake, torch.ones_like(disc_fake))
             gen_features = feature_extractor(fake)
             real_features = feature_extractor(high_res)
 
-            loss_content = criterion_content(gen_features, real_features)
+            loss_content = mse(gen_features, real_features)
             loss_G = loss_content + adversarial_loss
 
             gen_loss += loss_G.item()
@@ -196,9 +196,9 @@ if __name__ == "__main__":
     os.environ["TORCH_USE_CUDA_DSA"] = '1'
 
     # Options 
-    EPOCHS = 300
+    EPOCHS = 200
     BATCH_SIZE = 8
-    LEARNING_RATE = 5e-6
+    LEARNING_RATE = 1e-5
     CHECKPOINT_PATH = "/home/hjkim/projects/local_dev/dental_SRNet/SRGAN/checkpoint"
     PLOT_PATH = "/home/hjkim/projects/local_dev/dental_SRNet/SRGAN/checkpoint"
     IMAGE_SIZE = 512
@@ -210,13 +210,13 @@ if __name__ == "__main__":
     disc = Discriminator(in_channels=1).to(device)
 
     # Loss Function & Optimizer
-    criterion = nn.MSELoss().to(device)
-    # criterion = nn.BCEWithLogitsLoss().to(device)
+    bce = nn.L1Loss().to(device)
     feature_extractor = FeatureExtractor().to(device)
-    criterion_content = nn.MSELoss().to(device)
+    mse = nn.MSELoss().to(device)
     opt_gen = optim.Adam(gen.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999))
     opt_disc = optim.Adam(disc.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.999))
     scheduler = ReduceLROnPlateau(opt_gen, mode='min', patience=3, factor=0.5, verbose=True)
+
     # Import Dataset
     train_data, valid_data, test_data = split_dataset()
 
@@ -238,14 +238,14 @@ if __name__ == "__main__":
     for epoch in range(EPOCHS):
         
         # Train
-        train_epoch_gen_loss, train_epoch_disc_loss, train_epoch_psnr = train_one_epoch(train_dl, disc, gen, feature_extractor, opt_gen, opt_disc, criterion, criterion_content, device)
+        train_epoch_gen_loss, train_epoch_disc_loss, train_epoch_psnr = train_one_epoch(train_dl, disc, gen, feature_extractor, opt_gen, opt_disc, bce, mse, device)
         
         train_gen_losses.append(train_epoch_gen_loss)
         train_disc_losses.append(train_epoch_disc_loss)
         train_psnr.append(train_epoch_psnr)
 
         # Valid
-        valid_epoch_gen_loss, valid_epoch_disc_loss, valid_epoch_psnr = valid_one_epoch(valid_dl, disc, gen, feature_extractor, criterion, criterion_content, device)
+        valid_epoch_gen_loss, valid_epoch_disc_loss, valid_epoch_psnr = valid_one_epoch(valid_dl, disc, gen, feature_extractor, bce, mse, device)
         scheduler.step(valid_epoch_disc_loss)
         valid_gen_losses.append(valid_epoch_gen_loss)
         valid_disc_losses.append(valid_epoch_disc_loss)
